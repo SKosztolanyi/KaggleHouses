@@ -1,0 +1,135 @@
+---
+title: "Building the Benchmark"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+## R Notebook
+R Notebook is a new feature of RStudio, you can try them it by downloading the Preview version of RStudio.
+It's a trade-off between RMarkdown that needs to be knitted to see the results and a script, that prints output to the console and not to the file itself.
+One cool thing you may notice is, that you can click in between outputs that are produced in different windows after some chunk of code has more than one output.
+
+## Benchmark model
+The purpose of benchmark is very straigforward. It is a very basic model that you can compare your other results against and measure your improvements. Benchmark is meant to be beat as it is usually very simple solution. When trying new stuff it is important to get a quick feedback on how good it is. Hence the benchmark.
+
+## Setting folder of working directory and reading data from it:
+```{r}
+setwd("C:/Your/Working/Directory/With/Datasets")
+train_data <- read.csv('train.csv')
+test_data <- read.csv('test.csv')
+```
+
+# What's in the train data?
+```{r}
+head(train_data)
+```
+
+
+
+## Train simple linear regression benchmark model and see it's accuracy:
+```{r}
+benchmark_model <- lm(SalePrice ~ YrSold + MoSold + LotArea + BedroomAbvGr, data = train_data)
+summary(benchmark_model)
+```
+
+This exact model is used as a benchmark model for benchmark_submission.csv, but the model is not provided. Therefore I wanted to replicate it and see if the results match (they do).
+Plus I wanted to see how well is the model doing on Training dataset itself and the result is very poor as you will see later.
+
+## Predict on train
+```{r}
+train_predict <- predict(benchmark_model, newdata = train_data)
+head(train_predict)
+```
+
+
+## Create Data frame comparing original and predicted values for training dataset
+```{r}
+predicted_vs_original <- data.frame(train_data$Id, train_data$SalePrice, train_predict, 
+                                    (train_data$SalePrice - train_predict),
+                                    abs(train_data$SalePrice - train_predict),
+                                    ((abs(train_data$SalePrice - train_predict))*100)/train_data$SalePrice )
+names(predicted_vs_original) <- c('Id', 'RealSalePrice', 'PredictedSalePrice',
+                                  'PredictionError','AbsolutePredictionError', 'ErrorInPercentages')
+
+# round to 2 decimal places 
+predicted_vs_original <- lapply(predicted_vs_original, round, 2)
+rounded_DF <- (data.frame(predicted_vs_original))
+# Save the predictions to csv
+write.csv(rounded_DF, file = 'RealVsOriginalSalePrice.csv', row.names = FALSE)
+```
+
+
+## See the mistake of train data prediction based on benchmark model
+```{r}
+percentage_error = ((abs(train_data$SalePrice - train_predict))*100)/train_data$SalePrice
+summary(percentage_error)
+hist(percentage_error, breaks = 55)
+```
+Definitely underfitted model using not very good variables.
+But it's benchmark hey!
+
+## Calculate residuals and plot them
+```{r}
+# manual way
+train_residuals <- train_data$SalePrice - train_predict
+plot(train_residuals)
+# request residuals from model
+model_res <- residuals(benchmark_model)
+min(model_res)
+mean(model_res)
+max(model_res)
+```
+0 is the value of prediction for the Index (house number).
+
+## Plot in different ways
+```{r}
+plot(benchmark_model)
+```
+These four plots are harder to intepret, but hey, they are plots, right?
+They are not pretty either.
+
+### Predict on test
+```{r}
+test_benchmark_predict <- predict(benchmark_model, newdata = test_data)
+head(test_benchmark_predict)
+```
+
+### Create data frame for submission:
+```{r}
+benchmark_submission <- data.frame(test_data$Id, test_benchmark_predict)
+names(benchmark_submission) <- c('Id', 'SalePrice')
+head(benchmark_submission)
+write.csv(benchmark_submission, 'Benchmark_submission.csv', row.names = FALSE)
+```
+Upload the benchmark_csv to kaggle and write down the result which will count as a benchmark result
+
+#### 0.40890
+
+What does this score mean?
+
+**According to the Kaggle web page, here is how it is counted:**
+
+*Submissions are evaluated on Root-Mean-Squared-Error (RMSE) between the logarithm of the predicted value and the logarithm of the observed sales price. (Taking logs means that errors in predicting expensive houses and cheap houses will affect the result equally.)*
+
+### So let's test it on the training set:
+```{r}
+library(hydroGOF)
+BM_RMSE_Train <- rmse(log(train_data$SalePrice),log(train_predict))
+BM_RMSE_Train
+```
+See? Almost as good/bad as the test set.
+
+# What's next?
+
+The next step is of course defeating the benchmark model. Come and join me on kaggle to cooperate on building better models :) Just send me a pm to join the team and we'll compete for prices (this one is just for swag).
