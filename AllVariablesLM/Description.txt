@@ -1,0 +1,1 @@
+This model uses all available variables in linear regression model.
