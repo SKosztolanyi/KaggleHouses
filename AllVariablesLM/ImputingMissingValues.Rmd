@@ -1,0 +1,178 @@
+---
+title: "Improving House Prediction Model"
+output: html_notebook
+---
+Aim of this notebook is to build better model for the House Prediction Competition
+```{r}
+setwd("C:/Users/stefan/Google Drive OldZZZ/Data Science/Data Activities/Kaggle/HousePrices")
+train_data <- read.csv('train.csv')
+test_data <- read.csv('test.csv')
+```
+## impute missing values using caret package
+```{r}
+library(caret)
+library(RANN)
+inpute_train <- preProcess(train_data, method= "knnImpute")
+set.seed(5)
+train_results <- predict(inpute_train, train_data)
+```
+
+## Impute using dummy variables
+```{r}
+dummies  = dummyVars(SalePrice ~ . -PoolQC-Fence-MiscFeature-Alley, data = train_data, na.action = na.omit)
+xtrain = predict(dummies, train_data)
+xdf <- as.data.frame(xtrain)
+```
+
+```{r}
+xdf["SalePrice"] = train_data$SalePrice
+```
+
+```{r}
+library(zoo)
+na.aggregate(train_data)
+```
+## What next
+No univesal solution of imputing values has worked.
+If it is factor i get some errors and if it's numeric i also get some.
+na.aggregate from zoo package just transforms everything into character.
+factor doesn't have a mean.
+
+What I need to do is check data type of every column in data frame and:
+1. if it's number, change NA with mean of column
+2. if it's factor, change <NA> with "NA" - a new factor label.
+
+This is Pythonic, not R approach to cleaning the missing values. In Python, the code is much cleaner and shorter, more readable.
+I need to find R equivalent to make this happen fast and in R way.
+```{r Type Based Imputetion}
+for(col in names(train_data)){
+      if (is.numeric(train_data[[col]]) == TRUE)
+            {
+            train_data[[col]][is.na(train_data[[col]])] <- median(train_data[[col]], na.rm=TRUE)
+            }
+      if (is.numeric(train_data[[col]]) == FALSE)
+            {
+            train_data[[col]] <- as.character(train_data[[col]])
+            train_data[[col]][is.na(train_data[[col]])] <- "NA"
+            train_data[[col]] <- as.factor(train_data[[col]])
+            }
+}
+```
+Possible idea 
+
+What I can do at least is to create a function from this for loop and make it reusable across datasets:
+```{r defining cleaning function}
+cleaning_function <- function(dataset_to_clean){
+      for(col in names(dataset_to_clean)){
+      if (is.numeric(dataset_to_clean[[col]]) == TRUE)
+            {
+            dataset_to_clean[[col]][is.na(dataset_to_clean[[col]])] <- median(dataset_to_clean[[col]], na.rm=TRUE)
+            }
+      if (is.numeric(dataset_to_clean[[col]]) == FALSE)
+            {
+            dataset_to_clean[[col]] <- as.character(dataset_to_clean[[col]])
+            dataset_to_clean[[col]][is.na(dataset_to_clean[[col]])] <- "NA"
+            dataset_to_clean[[col]] <- as.factor(dataset_to_clean[[col]])
+            }
+      
+      }
+      return(dataset_to_clean)
+}
+
+```
+
+
+# train after filled missing values
+```{r}
+library(caret)
+all_var_model <- train(SalePrice ~ . -Id, data = train_data, method = 'lm')
+```
+Another common error: 
+
+Error in train.formula(SalePrice ~ . - Id - PoolQC - Fence - MiscFeature - : Every row has at least one missing value were found
+
+WTF do with it?
+
+There was an error in this step, fit may be misleading
+
+```{r}
+summary(train_data)
+```
+Let's see if the model is overfitted or what happened with it:
+```{r}
+predict_train <- predict(all_var_model, newdata=train_data)
+head(predict_train)
+```
+
+```{r}
+predict_test <- predict(all_var_model, newdata = test_data)
+predict_test
+```
+What's going on? Why is the predicted result numeric(0)?
+The most probable reason being, the variables are cleaned only in training set, but the testing dataset remained unclean.
+
+I could concatanate them at the beginning and do it in one go and then split the dataset again or do the same cleaning in this second dataset. I'll do the second option now.
+
+```{r clean test dataset}
+clean_train <- cleaning_function(train_data)
+clean_test <- cleaning_function(test_data)
+```
+Build the new model with clean dataset
+```{r}
+all_var_clean <- train(SalePrice ~ ., data = clean_train, method = "lm")
+summary(all_var_clean)
+```
+
+
+Let's try predicting on test again:
+```{r predict on clean test}
+predict_test <- predict(all_var_clean, newdata = clean_test)
+predict_test[0:5]
+```
+Whoa!
+What is this crazy new mistake?
+Apparently, there are 6 factor levels in Testing dataset and only 5 factor levels in Training dataset for this variable (MZSoning).
+What to do about it? Maybe updating the model with the variable from testing dataset? But why isn't it solved automatically?!
+```{r}
+for(col in names(all_var_clean$xlevels)){
+      all_var_clean$xlevels[[col]] <- union(all_var_clean$xlevels[[col]], levels(clean_test[[col]]))
+}
+# This was the idead:
+#all_var_model$xlevels[["y"]] <- union(mod2$xlevels[["y"]], levels(test$y))
+```
+
+Another option: Set all new levels from test dataset to NA
+Problem here is, that missing value can only be present in test dataset and not in train dataset already. The previous process solves the problem in that case.
+```{r set all unknown levels in test dataset to NA}
+for(col in names(clean_test)){
+      id <- which(!(clean_test[[col]] %in% levels(train_data[[col]])))
+      clean_test[[col]][id] <- "NA"
+}
+# This was the idea:
+#id <- which(!(test_data$predictor %in% levels(foo$predictor)))
+#foo.new$predictor[id] <- NA
+```
+Predict after all the cleaning and updating steps
+```{r predict on updated clean test}
+predict_test <- predict(all_var_clean, newdata = clean_test)
+predict_test[0:5]
+```
+
+Now that was something.
+Let's quickly save the results and upload them to get a score for this overfitted model.
+### Creating submission csv
+```{r}
+all_var_submission <- data.frame(clean_test$Id, predict_test)
+names(all_var_submission) <- c('Id', 'SalePrice')
+head(all_var_submission)
+write.csv(all_var_submission, 'All_var_submission.csv', row.names = FALSE)
+```
+
+What is the score from Kaggle?
+
+### 0.19474
+
+You improved on your best score by 0.21416. Just a few hours of tuning the missing values to use all variables in a model, which is a model I don't want to use.
+
+
+
